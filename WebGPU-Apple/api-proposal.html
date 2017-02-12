@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WebGPU API</title>
+  <meta name="viewport" content="width=device-width">
+  <link href="third-party/prism.css" rel="stylesheet" />
+  <style>
+  body {
+      font-size: 14px;
+      line-height: 1.5;
+      font-family: -apple-system, Helvetica;
+      background-color: #eee;
+      padding: 30px 20px;
+      max-width: 1100px;
+  }
+  pre {
+      font-family: Menlo, monospace;
+      border: 1px solid #ccc;
+      font-size: 80%;
+  }
+  code.example {
+      padding-left: 3em !important;
+  }
+  h1 {
+      font-size: 45px;
+      font-weight: bold;
+      border-bottom: 1px solid #aac;
+      margin-bottom: 30px;
+  }
+
+  h2 {
+      font-size: 35px;
+      font-weight: bold;
+      border-bottom: 1px solid #ddd;
+      margin-bottom: 30px;
+  }
+  h3 {
+      font-size: 18px;
+      font-weight: normal;
+  }
+  header h3 {
+      text-align: right;
+  }
+  li {
+      margin: 0.5em 0;
+  }
+  a {
+      color: #500;
+  }
+  .note {
+      margin: 20px;
+      padding: 20px;
+      background-color: #E9ADAD;
+      border: 1px solid #FF3C2F;
+      border-left-width: 5px;
+  }
+  </style>
+  <!-- <link rel="stylesheet" href="highlight/github-gist.css">
+  <script src="highlight/highlight.pack.js"></script>
+  <script>hljs.initHighlightingOnLoad();</script> -->
+</head>
+<body>
+<script src="third-party/prism.js"></script>
+<header>
+<h1>WebGPU API Proposal</h1>
+
+<h3>30 Jan 2017 - <a href="mailto:dino@apple.com">dino@apple.com</a></h3>
+
+<h2>Contents</h2>
+
+<ol>
+    <li><a href="#introduction">Introduction</a></li>
+    <li><a href="#todo">To Do</a></li>
+    <li><a href="#api">API</a></li>
+    <li><a href="#shadinglanguage">Shading Language</a></li>
+    <li><a href="#examples">Examples</a></li>
+    <li><a href="#changes">Change Log</a></li>
+</ol>
+</header>
+
+<h2 id="introduction">1. Introduction</h2>
+
+<p>
+This is Apple's draft proposal for the WebGPU API. It started
+as a mapping of Metal to JavaScript, but that won't be where it
+ends up. Not only are there some things in Metal that don't
+quite fit with Vulkan and D3D12, we also don't
+want to be tied to the Metal API.
+So please consider this a work in progress.
+There is a small source code example at
+the end (although it is a bit out of date).
+</p>
+
+<p>
+The main differences from the traditional native GPU APIs are:
+</p>
+
+<ul>
+
+<li>Since we always need to validate shader code, you can only create a library
+by passing a string. At some point we'll need an entry point for a
+ByteArray, which hold the raw IR format (e.g. SPIR-V for WebGPU).</li>
+
+<li>The Array types are exposed as native JavaScript Arrays.</li>
+
+<li>Constants are exposed as strings rather than numbers. I'm
+not sure what to do about the bitmasks yet - it's not something you typically
+see in JavaScript.</li>
+
+<li>No parallel render command encoders.</li>
+
+</ul>
+
+
+<h2 id="todo">2. To Do</h2>
+
+<ul>
+
+<li>Missing APIs for reflection (e.g. vertex attribute information)</li>
+
+<li>I'm still trying to work out what the best way to display the rendered
+output is, i.e. the equivalent of presentDrawable. This is really important,
+but I haven't thought of a nice Web-ish way to do it yet.</li>
+
+<li>We probably need to be a lot more smart about threading/Workers.
+Many people will want to have the renderer running on a separate Worker, and
+signalling back to the main thread that the canvas should be displayed.</li>
+
+<li>Come up with some less Metal-like names for some things where possible.
+Vulkan uses Graphics rather than Render, and DMA rather than Blit.</li>
+
+<li>The Descriptor objects should take JS dictionaries as optional arguments in
+the constructor, which would allow for one step configuration. For example,
+WebGPUTextureDescriptor should have an WebGPUTextureDescriptorInit dictionary
+type that can be used for construction.</li>
+
+<li>There are a lot of questions in comments e.g. how to expose a color</li>
+
+<li>Add support for compressed textures. ASTC is a good choice on mobile, but
+    not supported on desktop.</li>
+</ul>
+
+
+<h2 id="api">3. API</h2>
+
+<pre>
+<code class="language-clike">
+interface WebGPURenderingContext : CanvasRenderingContext {
+
+    // -- Identification and feature detection
+    
+    readonly attribute DOMString name;
+    boolean supportsFeatureSet(WebGPUFeatureSet featureSet);
+
+    // -- Library creation
+
+    WebGPULibrary createLibrary(DOMString sourceCode);
+
+    // -- Command queue creation
+    
+    WebGPUCommandQueue createCommandQueue();
+    // @@ Do we need createCommandQueueWithMaxCommandBufferCount?
+
+    // -- Resources
+
+    WebGPUBuffer createBuffer(ArrayBufferView data);
+    WebGPUTexture createTexture(WebGPUTextureDescriptor descriptor);
+    WebGPUSamplerState createSamplerState(WebGPUSamplerDescriptor descriptor);
+
+    // -- Rendering objects
+    WebGPUDepthStencilState createDepthStencilState(WebGPUDepthStencilDescriptor descriptor);
+    WebGPURenderPipelineState createRenderPipelineState(WebGPURenderPipelineDescriptor
+                                                          descriptor);
+    // @@ Do we need the completion block versions?
+
+    // -- Compute
+    WebGPUComputePipelineState createComputePipelineState(WebGPUFunction function);
+    WebGPUComputePipelineState createComputePipelineState(WebGPUComputePipelineDescriptor
+                                                            descriptor);
+
+    // -- Getting the rendering destination
+    WebGPUDrawable nextDrawable();
+    // @@ Come up with a better way to do this.
+
+};
+
+interface WebGPUCommandQueue {
+
+    attribute DOMString label;
+
+    WebGPUCommandBuffer createCommandBuffer();
+};
+
+interface WebGPUCommandBuffer {
+
+    // -- Command Encoders
+    WebGPURenderCommandEncoder createRenderCommandEncoder(WebGPURenderPassDescriptor
+                                                            descriptor);
+    WebGPUBlitCommandEncoder createBlitCommandEncoder();
+    WebGPUComputeCommandEncoder createComputeCommandEncoder();
+
+    // -- Status
+    readonly attribute WebGPUStatus status;
+    readonly attribute DOMString error; // @@ need enum
+
+    // - Execution
+
+    void commit();
+    void presentDrawable(WebGPUDrawable drawable);
+    readonly attribute Promise scheduled;
+    readonly attribute Promise completed;
+    // @@ Should the completed promise be the return value of commit()?
+
+    // @@ Maybe add enqueue or invent some way to offload filling the buffer
+    // to workers?
+};
+
+interface WebGPUDrawable {
+
+    readonly attribute WebGPUTexture texture; // @@ Only the framebuffer should have this.
+
+    void present();
+
+};
+
+interface WebGPUCommandEncoder {
+
+    readonly attribute DOMString label;
+
+    void endEncoding();
+    
+    // @@ Debugging helpers?
+}
+
+interface WebGPURenderCommandEncoder : WebGPUCommandEncoder {
+
+    // -- State
+
+    // @@ Should these be attributes?
+    void setBlendColor(float red, float green, float blue, float alpha);
+    void setCullMode(WebGPUCullMode mode);
+    void setDepthBias(float bias, float scale, float clamp);
+    void setDepthClipMode(WebGPUDepthClipMode mode);
+    void setDepthStencilState(WebGPUDepthStencilState depthStencilState);
+    void setFrontFacingWinding(WebGPUWinding mode);
+    void setRenderPipelineState(WebGPURenderPipelineState pipelineState);
+    // @@ Use Geometry interfaces?
+    void setScissorRect(float x, float y, float width, float height);
+    void setStencilReferenceValue(unsigned long value);
+    // @@ Check if we can overload here
+    void setStencilReferenceValue(unsigned long front, unsigned long back);
+    void setTriangleFillMode(WebGPUTriangleFill mode);
+    void setViewport(WebGPUViewportDictionary viewport);
+    void setVisibilityResultMode(WebGPUVisibilityResultMode mode, unsigned long offset);
+
+    // -- Resources
+    
+    void setVertexBuffer(WebGPUBuffer buffer, unsigned long offset, unsigned long index);
+    void setVertexBuffers(WebGPUBuffer[] buffers, unsigned long[] offsets,
+                          unsigned long startIndex, unsigned long count);
+    // @@ need setVertexBytes?
+    void setVertexSamplerState(WebGPUSamplerState samplerState, unsigned long index);
+    void setVertexSamplerStates(WebGPUSamplerState[] samplerState, unsigned long startIndex,
+                                unsigned long count);
+    void setVertexTexture(WebGPUTexture texture, unsigned long index);
+    void setVertexTextures(WebGPUTexture[] textures, unsigned long startIndex,
+                           unsigned long count);
+
+    void setFragmentBuffer(WebGPUBuffer buffer, unsigned long offset, unsigned long index);
+    void setFragmentBuffers(WebGPUBuffer[] buffers, unsigned long[] offsets,
+                            unsigned long startIndex, unsigned long count);
+    // @@ need setFragmentBytes?
+    void setFragmentSamplerState(WebGPUSamplerState samplerState, unsigned long index);
+    void setFragmentSamplerStates(WebGPUSamplerState[] samplerState, unsigned long startIndex,
+                                  unsigned long count);
+    void setFragmentTexture(WebGPUTexture texture, unsigned long index);
+    void setFragmentTextures(WebGPUTexture[] textures, unsigned long startIndex,
+                             unsigned long count);
+
+    // -- Drawing
+
+    void drawPrimitives(unsigned long type, unsigned long start, unsigned long count);
+    // @@ add drawInstanced and drawIndexed
+
+};
+
+interface WebGPUBlitCommandEncoder : WebGPUCommandEncoder {
+    // -- Copying Data Between Two Buffers
+    void copyFromBufferToBuffer(WebGPUBuffer source, unsigned long sourceOffset,
+                                WebGPUBuffer destination,
+                                unsigned long destinationOffset, unsigned long size);
+
+    // -- Copying Data From a Buffer to a Texture
+    void copyFromBufferToTexture(WebGPUBuffer buffer, unsigned long sourceOffset,
+                                 unsigned long sourceBytesPerRow,
+                                 unsigned long sourceBytesPerImage, WebGPUSize size,
+                                 WebGPUTexture texture,
+                                 unsigned long destinationSlice, unsigned long destinationLevel,
+                                 WebGPUOrigin origin);
+
+    // -- Copying Data Between Two Textures
+    void copyFromTextureToTexture();
+
+    // -- Copying Data from a Texture to a Buffer
+    void copyFromTextureToBuffer();
+    
+    // - Image Operations
+    void fillBuffer(WebGPUBuffer buffer, unsigned long start,
+                    unsigned long count, unsigned long value);
+    void generateMipmapsForTexture();
+}
+
+interface WebGPUComputeCommandEncoder : WebGPUCommandEncoder {
+
+    // - Specifying the Compute Pipeline State
+    void setComputePipelineState(WebGPUComputePipelineState state);
+    
+    // -- Buffers and Textures
+    void setBuffer(WebGPUBuffer buffer, unsigned long offset, unsigned long index);
+    void setBuffers(WebGPUBuffer[] buffers, unsigned long[] offsets,
+                    unsigned long startIndex, unsigned long count);
+
+    void setBuffer(ArrayBufferView bufferView, unsigned long index);
+
+    void setTexture(WebGPUTexture texture, unsigned long index);
+    void setTextures(WebGPUTexture[] textures, unsigned long startIndex, unsigned long count);
+
+    void setSamplerState(WebGPUSamplerState samplerState, unsigned long index);
+    void setSamplerStates(WebGPUSamplerState[] samplerStates, unsigned long startIndex,
+                          unsigned long count);
+
+    // @@ do we need setThreadgroupMemoryLength?
+    
+    // -- Executing
+    void dispatch(WebGPUSize threadgroupsPerGrid, WebGPUSize threadsPerThreadgroup);
+    // @@ dispatchThreadgroupsWithIndirectBuffer?
+};
+
+interface WebGPUViewport {
+    attribute double originX;
+    attribute double originY;
+    attribute double width;
+    attribute double height;
+    attribute double znear;
+    attribute double zfar;
+};
+
+[ Constructor ]
+interface WebGPURenderPipelineDescriptor {
+
+    attribute DOMString label;
+
+    attribute WebGPUFunction vertexFunction;
+    attribute WebGPUVertexDescriptor vertexDescriptor;
+    attribute WebGPUFunction fragmentFunction;
+
+    attribute unsigned long sampleCount;
+    attribute boolean alphaToCoverageEnabled;
+    attribute boolean alphaToOneEnabled;
+    attribute boolean rasterizationEnabled;
+
+    readonly attribute WebGPURenderPipelineColorAttachmentDescriptor[] colorAttachments;
+    attribute WebGPUPixelFormat depthAttachmentPixelFormat;
+    attribute WebGPUPixelFormat stencilAttachmentPixelFormat;
+
+    void reset();
+
+};
+
+interface WebGPURenderPipelineState {
+    attribute DOMString label;
+};
+
+[ Constructor ]
+interface WebGPUComputePipelineDescriptor {
+
+    attribute DOMString label;
+
+    attribute WebGPUFunction computeFunction;
+    attribute boolean threadGroupSizeIsMultipleOfThreadExecutionWidth;
+
+    void reset();
+
+};
+
+interface WebGPUComputePipelineState {
+    attribute unsigned long maxTotalThreadsPerThreadgroup;
+    attribute unsigned long threadExecutionWidth;
+};
+
+[ Constructor ]
+interface WebGPUDepthStencilDescriptor {
+
+    attribute DOMString label;
+
+    attribute WebGPUCompareFunction depthCompareFunction; 
+    attribute boolean depthWriteEnabled;
+    
+    attribute WebGPUStencilDescriptor backFaceStencil;
+    attribute WebGPUStencilDescriptor frontFaceStencil;
+};
+
+[ Constructor ]
+interface WebGPUStencilDescriptor {
+
+    // -- Specifying Stencil Functions and Operations
+    attribute WebGPUStencilOperation stencilFailureOperation;
+    attribute WebGPUStencilOperation depthFailureOperation;
+    attribute WebGPUStencilOperation depthStencilPassOperation;
+    attribute WebGPUCompareFunction stencilCompareFunction;
+
+    // -- Specifying Stencil Bit Mask Properties
+    attribute unsigned int readMask;
+    attribute unsigned int writeMask;
+}
+
+interface WebGPUDepthStencilState {
+    attribute DOMString label;
+};
+
+interface WebGPUSamplerDescriptor {
+    attribute WebGPUSamplerAddressMode rAddressMode;
+    attribute WebGPUSamplerAddressMode sAddressMode;
+    attribute WebGPUSamplerAddressMode tAddressMode;
+    attribute WebGPUSamplerMinMagFilter minFilter;
+    attribute WebGPUSamplerMinMagFilter magFilter;
+    attribute WebGPUSamplerMipFilter mipFilter;
+    attribute float lodMinClamp;
+    attribute float lodMaxClamp;
+    attribute boolean lodAverage;
+    attribute unsigned long maxAnisotropy;
+    attribute boolean normalizedCoordinates;
+    attribute WebGPUCompareFunction compareFunction;
+    attribute DOMString label;
+}
+
+interface WebGPUSamplerState {
+    attribute DOMString label;
+};
+
+interface WebGPURenderPassAttachmentDescriptor {
+    
+    // -- Texture
+    attribute WebGPUTexture texture;
+    attribute unsigned long level;
+    attribute unsigned long slice;
+    attribute unsigned long depthPlane;
+
+    // -- Rendering Pass Actions
+    attribute WebGPULoadAction loadAction;
+    attribute WebGPUStoreAction storeAction;
+
+    // -- Specifying the Texture to Resolve Multisample Data
+    attribute WebGPUTexture resolveTexture;
+    attribute unsigned long resolveLevel;
+    attribute unsigned long resolveSlice;
+    attribute unsigned long resolveDepthPlane;
+};
+
+interface WebGPURenderPassColorAttachmentDescriptor : WebGPURenderPassAttachmentDescriptor {
+
+    attribute float[] clearColor; // @@ should color be a type?
+
+};
+
+interface WebGPURenderPassDepthAttachmentDescriptor : WebGPURenderPassAttachmentDescriptor {
+
+    attribute double clearDepth;
+    attribute WebGPUMultisampleDepthResolveFilter depthResolveFilter;
+
+};
+
+interface WebGPURenderPassStencilAttachmentDescriptor : WebGPURenderPassAttachmentDescriptor {
+
+    attribute unsigned long clearStencil;
+
+};
+
+[ Constructor ]
+interface WebGPURenderPassDescriptor {
+
+    readonly attribute WebGPURenderPassColorAttachmentDescriptor[] colorAttachments;
+    attribute WebGPURenderPassDepthAttachmentDescriptor depthAttachment;
+    attribute WebGPURenderPassStencilAttachmentDescriptor stencilAttachment;
+
+    attribute WebGPUBuffer visibilityResultBuffer;
+
+};
+
+interface WebGPURenderPipelineColorAttachmentDescriptor {
+
+    // -- Pipeline state
+    attribute WebGPUPixelFormat pixelFormat;
+    attribute WebGPUColorWriteMask writeMask;
+
+    // -- Blending
+    attribute boolean blendingEnabled;
+    attribute WebGPUBlendOperation rgbBlendOperation;
+    attribute WebGPUBlendOperation alphaBlendOperation;
+
+    // -- Blend Factors
+    attribute WebGPUBlendFactor sourceRGBBlendFactor;
+    attribute WebGPUBlendFactor destinationRGBBlendFactor;
+    attribute WebGPUBlendFactor sourceAlphaBlendFactor;
+    attribute WebGPUBlendFactor destinationAlphaBlendFactor;
+};
+
+interface WebGPUResource {
+    readonly attribute WebGPUCPUCacheMode cpuCacheMode;
+    readonly attribute WebGPUStorageMode storageMode;
+    readonly attribute DOMString label;
+    
+    void setPurgeableState(DOMString state);
+}
+
+interface WebGPUOrigin {
+    attribute unsigned long x;
+    attribute unsigned long y;
+    attribute unsigned long z;
+};
+
+interface WebGPUSize {
+    attribute unsigned long width;
+    attribute unsigned long height;
+    attribute unsigned long depth;
+};
+
+interface WebGPURegion {
+    attribute WebGPUOrigin origin;
+    attribute WebGPUSize size;
+}
+
+interface WebGPUTexture : WebGPUResource {
+
+    // @@ need API to provide data from &lt;img&gt;, &lt;canvas&gt;, &lt;video&gt; etc
+
+    // -- Copying Data into a Texture Image
+    void replaceRegion(WebGPURegion region, unsigned long mipmapLevel, unsigned long slice,
+                       ArrayBufferView bytes, unsigned long bytesPerRow,
+                       unsigned long bytesPerImage);
+    void replaceRegion(WebGPURegion region, unsigned long mipmapLevel,
+                       ArrayBufferView bytes, unsigned long bytesPerRow);
+
+    // -- Copying Data from a Texture Image
+    ArrayBufferView getBytes(unsigned long bytesPerRow, unsigned long bytesPerImage,
+                             WebGPURegion region, unsigned long mipmapLevel, unsigned long slice);
+
+    // -- Creating Textures by Reusing Image Data
+    WebGPUTexture newTextureView(DOMString pixelFormat, DOMString textureType,
+                                WebGPURange levelRange, WebGPURange sliceRange);
+
+    // -- Querying Texture Attributes
+    readonly attribute DOMString textureType;
+    readonly attribute DOMString pixelFormat;
+    readonly attribute unsigned long width;
+    readonly attribute unsigned long height;
+    readonly attribute unsigned long depth;
+    readonly attribute unsigned long mipmapLevelCount;
+    readonly attribute unsigned long arrayLength;
+    readonly attribute unsigned long sampleCount;
+    readonly attribute boolean framebufferOnly;
+    readonly attribute WebGPUResource rootResource;
+    readonly attribute WebGPUTextureUsage usage;
+
+    // -- Querying Parent Texture Attributes
+    readonly attribute WebGPUTexture parentTexture;
+    readonly attribute unsigned long parentRelativeLevel;
+    readonly attribute unsigned long parentRelativeSlice;
+
+    // -- Querying Source Buffer Attributes
+    readonly attribute WebGPUBuffer buffer;
+    readonly attribute unsigned long bufferOffset;
+    readonly attribute unsigned long bufferBytesPerRow;
+};
+
+[ Constructor ]
+interface WebGPUTextureDescriptor {
+    attribute DOMString textureType;
+    attribute DOMString pixelFormat;
+    attribute unsigned long width;
+    attribute unsigned long height;
+    attribute unsigned long depth;
+    attribute unsigned long mipmapLevelCount;
+    attribute unsigned long sampleCount;
+    attribute unsigned long arrayCount;
+    attribute WebGPUResourceOptions resourceOptions;
+    attribute WebGPUCPUCacheMode cpuCacheMode;
+    attribute WebGPUStorageMode storageMode;
+    attribute WebGPUTextureUsage usage;
+};
+
+interface WebGPUBuffer : WebGPUResource {
+
+    WebGPUTexture createTexture(WebGPUTextureDescriptor descriptor,
+                               unsigned long offset, unsigned long bytesPerRow);
+
+    readonly attribute unsigned long length;
+    readonly attribute ArrayBufferView contents;
+
+};
+
+interface WebGPULibrary {
+
+    readonly attribute DOMString sourceCode;
+    attribute DOMString label;
+    readonly attribute DOMString[] functionNames;
+
+    WebGPUFunction functionWithName(DOMString name);
+
+};
+
+
+interface WebGPUFunction {
+
+    readonly attribute DOMString name;
+    readonly attribute WebGPUFunctionType functionType;
+
+    readonly attribute WebGPUVertexAttributes[] vertexAttributes;
+};
+
+enum WebGPUCompareFunction {
+    "never",
+    "less",
+    "equal",
+    "lessequal",
+    "greater",
+    "notequal",
+    "greaterequal",
+    "always"
+};
+
+enum WebGPUPixelFormat {
+    "BGRA8Unorm",
+    etc
+};
+
+enum WebGPULoadAction {
+    "dontcare",
+    "load",
+    "clear"
+};
+
+enum WebGPUStoreAction {
+    "dontcare",
+    "store",
+    "multisampleresolve"
+};
+
+enum WebGPUPrimitiveType {
+    "point",
+    "line",
+    "linestrip",
+    "triangle",
+    "trianglestrip"
+};
+
+enum WebGPUFunctionType {
+    "fragment",
+    "vertex"
+};
+
+enum WebGPUStencilOperation {
+    "keep",
+    "zero",
+    "replace",
+    "incrementclamp",
+    "decrementclamp",
+    "invert",
+    "incrementwrap",
+    "decrementwrap"
+};
+
+enum WebGPUStatus {
+    "notenqueued",
+    "enqueued",
+    "committed",
+    "scheduled",
+    "completed",
+    "error"
+};
+
+enum WebGPUSamplerAddressMode {
+    "clamptoedge",
+    "mirrorclamptoedge",
+    "repeat",
+    "mirrorrepeat",
+    "clamptozero"
+};
+
+enum WebGPUSamplerMinMagFilter {
+    "nearest",
+    "linear"
+};
+
+enum WebGPUSamplerMipFilter {
+    "notmipmapped",
+    "nearest",
+    "linear"
+};
+
+enum WebGPUCullMode {
+    "none",
+    "front",
+    "back"
+};
+
+enum WebGPUIndexType {
+    "uint16",
+    "uint32"
+};
+
+enum WebGPUVisibilityResultMode {
+    "disabled",
+    "boolean",
+    "counting"
+};
+
+enum WebGPUWinding {
+    "clockwise",
+    "counterclockwise"
+};
+
+enum WebGPUDepthClipMode {
+    "clip",
+    "clamp"
+};
+
+enum WebGPUTriangleFillMode {
+    "fill",
+    "lines"
+};
+
+enum WebGPUCPUCacheMode {
+    "defaultcache",
+    "writecombined"
+};
+
+enum WebGPUStorageMode {
+    "shared",
+    "managed",
+    "private"
+};
+
+enum WebGPUResourceOptions {
+    "cpucachemodedefaultcache",
+    "cpucachemodewritecombined",
+    "storagemodeshared",
+    "storagemodemanaged",
+    "storagemodeprivate",
+    "optioncpucachemodedefaultcache",
+    "optioncpucachemodewritecombined"
+};
+
+enum WebGPUTextureUsage {
+    "unknown",
+    "shaderread",
+    "shaderwrite",
+    "rendertarget",
+    "pixelformatview"
+};
+
+enum WebGPUBlendOperation {
+    "add",
+    "subtract",
+    "reversesubtract",
+    "min",
+    "max"
+};
+
+enum WebGPUBlendFactor {
+    "zero",
+    "one",
+    "sourcecolor",
+    "oneminussourcecolor",
+    "sourcealpha",
+    "oneminussourcealpha",
+    "destinationcolor",
+    "oneminusdestinationcolor",
+    "destinationalpha",
+    "oneminusdestinationalpha",
+    "sourcealphasaturated",
+    "blendcolor",
+    "oneminusblendcolor",
+    "blendalpha",
+    "oneminusblendalpha",
+};
+
+enum WebGPUColorWriteMask {
+    // This is a mask, so the calling site
+    // should take an array of them.
+    "none",
+    "red",
+    "green",
+    "blue",
+    "alpha",
+    "all"
+}
+
+enum WebGPUMultisampleDepthResolveFilter {
+    "sample0",
+    "min",
+    "max"
+};
+
+enum WebGPUFeatureSet {
+    // some names like...
+    "level1",
+    "level2"
+};
+</code>
+</pre>
+
+<h2 id="shadinglanguage">4. Shading Language</h2>
+
+<p>WebGPU accepts a variant of the <a
+href="https://developer.apple.com/library/ios/documentation/Metal/Reference/Meta
+lShadingLanguageGuide/Introduction/Introduction.html">Metal Shading
+Language</a> called the WebGPU Shading Language.
+
+<p>The high-level changes from the standard Metal to WebGPU language are:</p>
+
+<ul>
+
+<li>Built-in types and functions are in the "WebGPU" namespace</li>
+
+<li>Buffers/Arrays are not exposed via raw pointers. Instead, the shader must
+    use the built-in <code>buffer&lt;T&gt;</code> type from the "WebGPU"
+    namespace. This type acts like an array, but overrides the index
+    access to forbid out-of-bounds access.</li>
+
+<li>Similarly, texture reads and writes are bounds-checked, and arrays
+    of textures/samplers.</li>
+
+</ul>
+
+<p class="note">Ultimately, WebGPU will accept a shader in
+    some IR format, similar to DXIL or SPIR-V. It's not clear
+    yet if there will be a human-readable shading format.</p>
+
+<h2 id="examples">Examples</h2>
+
+<h3>Example 1</h3>
+
+<p>Drawing a triangle</p>
+
+<pre><code class="language-js">
+let canvas = document.querySelector("canvas");
+canvas.width = 500;
+canvas.height = 500;
+let gpu = canvas.getContext("Webgpu");
+
+let library = gpu.createLibrary(loadShaderFromScript("library"));
+library.label = "Example label";
+
+let vertexF = library.functionWithName("vertex_main");
+let fragmentF = library.functionWithName("fragment_main");
+
+let vertexData = new Float32Array([
+    // x y z 1 r g b 1
+    0, 0.75, 0, 1, 1, 0, 0, 1,
+    -0.75, -0.75, 0, 1, 0, 1, 0, 1,
+    0.75, -0.75, 0, 1, 0, 0, 1, 1
+]);
+let vertexBuffer = gpu.createBuffer(vertexData);
+
+let pipelineDescriptor = new WebGPURenderPipelineDescriptor();
+pipelineDescriptor.vertexFunction = vertexF;
+pipelineDescriptor.fragmentFunction = fragmentF;
+pipelineDescriptor.colorAttachments[0].pixelFormat = "BGRA8Unorm";
+
+let pipelineState = gpu.createRenderPipelineState(pipelineDescriptor);
+
+let drawable = gpu.nextDrawable();
+
+let passDescriptor = new WebGPURenderPassDescriptor();
+passDescriptor.colorAttachments[0].loadAction = "clear";
+passDescriptor.colorAttachments[0].storeAction = "store";
+passDescriptor.colorAttachments[0].clearColor = [0.8, 0.8, 0.8, 1.0];
+passDescriptor.colorAttachments[0].texture = drawable.texture;
+
+let commandQueue = gpu.createCommandQueue();
+
+let commandBuffer = commandQueue.createCommandBuffer();
+
+let commandEncoder = commandBuffer.createRenderCommandEncoder(passDescriptor);
+commandEncoder.setRenderPipelineState(pipelineState);
+commandEncoder.setVertexBuffer(vertexBuffer, 0, 0);
+
+commandEncoder.drawPrimitives("triangle", 0, 3);
+commandEncoder.endEncoding();
+commandBuffer.presentDrawable(drawable);
+commandBuffer.commit();
+</code></pre>
+
+<h3>Example 2</h3>
+
+<p>Updating uniforms</p>
+
+<pre><code class="language-js">
+// Setup
+let uniformData = new Float32Array([ 0.5 ]);
+let uniformBuffer = gpu.createBuffer(uniformData);
+
+
+// Each frame
+let uniformBufferView = new Float32Array(uniformBuffer.contents);
+uniformBufferView[0] = frameId * 10; // Some per-frame value
+
+let commandEncoder = commandBuffer.createRenderCommandEncoder(passDescriptor);
+commandEncoder.setRenderPipelineState(pipelineState);
+commandEncoder.setVertexBuffer(vertexBuffer, 0, 0);
+commandEncoder.setVertexBuffer(uniformBuffer, 0, 1);
+
+commandEncoder.drawPrimitives("triangle", 0, 3);
+commandEncoder.endEncoding();
+commandBuffer.presentDrawable(drawable);
+commandBuffer.commit();
+</code></pre>
+
+</body>
+</html>
